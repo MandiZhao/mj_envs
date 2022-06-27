@@ -111,6 +111,7 @@ register(
 # distance between end effector and all relevent objects in the scene
 
 print("RS:> Registering Kitchen Envs")
+
 from mj_envs.envs.multi_task.common.franka_kitchen_v1 import KitchenFrankaFixed, KitchenFrankaRandom, KitchenFrankaDemo
 
 MODEL_PATH = CURR_DIR + "/../common/kitchen/franka_kitchen.xml"
@@ -119,7 +120,8 @@ CONFIG_PATH = CURR_DIR + "/../common/kitchen/franka_kitchen.config"
 DEMO_ENTRY_POINT = "mj_envs.envs.multi_task.common.franka_kitchen_v1:KitchenFrankaDemo"
 RANDOM_ENTRY_POINT = "mj_envs.envs.multi_task.common.franka_kitchen_v1:KitchenFrankaRandom"
 FIXED_ENTRY_POINT = "mj_envs.envs.multi_task.common.franka_kitchen_v1:KitchenFrankaFixed"
-ENTRY_POINT = RANDOM_ENTRY_POINT
+AUGMENT_ENTRY_POINT = "mj_envs.envs.multi_task.common.franka_kitchen_v1:KitchenFrankaAugment"
+ENTRY_POINT = AUGMENT_ENTRY_POINT # RANDOM_ENTRY_POINT
 
 obs_keys_wt = {"robot_jnt": 1.0, "objs_jnt": 1.0, "obj_goal": 1.0, "end_effector": 1.0}
 for site in KitchenFrankaFixed.OBJ_INTERACTION_SITES:

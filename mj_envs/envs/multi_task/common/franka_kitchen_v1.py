@@ -10,6 +10,13 @@ import gym
 import numpy as np
 
 from mj_envs.envs.multi_task.multi_task_base_v1 import KitchenBase
+from mj_envs.utils.quat_math import euler2quat
+from mujoco_py.modder import TextureModder, LightModder
+import PIL.Image
+import os
+from mujoco_py import cymj
+from glob import glob 
+import random
 
 # ToDo: Get these details from key_frame
 DEMO_RESET_QPOS = np.array(
@@ -200,3 +207,290 @@ class KitchenFrankaRandom(KitchenFrankaFixed):
                 * (self.robot_ranges[:, 1] - self.robot_ranges[:, 0])
             )
         return super().reset(reset_qpos=reset_qpos, reset_qvel=reset_qvel)
+
+TEXTURE_ID_TO_INFOS = {
+    1: dict(
+        name='floor', 
+        shape=(1024, 1024, 3), 
+        group='floor',
+    ),
+    5: dict(
+        name='sink_handle', 
+        shape=(512, 512, 3),
+        group='handle',
+    ),
+    6: dict(
+        name='sink_top', 
+        shape=(512,512,3),
+        group='surface',
+    ),
+    7: dict(
+        name='drawer', 
+        shape=(512,512,3),
+        group='surface',
+    ),
+    10: dict(
+        name='sdoor_handle', 
+        shape=(512,512,3),
+        group='handle',
+    ),
+    11: dict(
+        name='sdoor_surface', 
+        shape=(512,512,3),
+        group='surface',
+    ),
+    12: dict(
+        name='lrdoor_surface', 
+        shape=(512,512,3),
+        group='surface',
+    ),
+    13: dict(
+        name='lrdoor_handle', 
+        shape=(512,512,3),
+        group='handle',
+    ),
+    14: dict(
+        name='micro_handle', 
+        shape=(1024,1024,3),
+        group='handle',
+    ),
+    
+    16: dict(
+        name='kettle_handle', 
+        shape=(512,512,3),
+        group='handle',
+    ),
+}
+TEX_DIR = '/Users/mandizhao/mj_envs/mj_envs/envs/relay_kitchen'
+OBJ_JNT_RANGE = {
+    'lightswitch_joint': (-0.7, 0), 
+    'rightdoorhinge': (0, 1.57), 
+    'slidedoor_joint': (0, 0.44), 
+    'leftdoorhinge': (-1.25, 0), 
+    'micro0joint': (-1.25, 0), 
+    'knob1_joint': (0, -1.57), 
+    'knob2_joint': (0, -1.57),   
+    'knob3_joint': (-1.57, 0), 
+    'knob4_joint': (-1.57, 0), 
+}
+OBJ_LIST = list(OBJ_JNT_RANGE.keys())
+
+class KitchenFrankaAugment(KitchenFrankaFixed):
+
+    def __init__(self, model_path, obsd_model_path=None, seed=None, **kwargs):
+
+        gym.utils.EzPickle.__init__(self, model_path, obsd_model_path, seed, **kwargs)
+        super().__init__(model_path=model_path, obsd_model_path=obsd_model_path, seed=seed)
+        super()._setup(**kwargs)
+
+        self.augment_types = []
+        self.body_rand_kwargs = {
+            "desk": {
+                "pos": {
+                    "center": [-0.1, 0.75, 0],
+                    "low":    [-.1, -.1, -.1],
+                    "high":   [.1, .1, .1],
+                    },
+                "euler": {
+                    "center": [0, 0, 0],
+                    "low":    [0, 0, -.15],
+                    "high":   [0, 0, .15],
+                    },             
+            },
+            "microwave": {
+                "pos": {
+                    "center": [-0.750, -0.025, 1.6],
+                    "low":    [-.1, -.1, 0],
+                    "high":   [.1, .1, .1],            
+                    },
+                "euler": {
+                    "center": [0, 0, .785],
+                    "low":    [0, 0, -.15],
+                    "high":   [0, 0, .15],
+                },
+            },
+            "hingecabinet": {
+                "pos": {
+                    "center": [-0.504, 0.28, 2.6],
+                    "low":    [-.1, -.1, 0],
+                    "high":   [.1, .1, .1],
+                },
+                "euler": {
+                    "center": [0, 0, 0],
+                    "low":    [0, 0, 0],
+                    "high":   [0, 0, 0],
+                },
+            },
+            "slidecabinet": {
+                "pos": {
+                    "center":  None,  # use hingecabinet randomzied pos
+                    "low":     [.904, 0, 0],
+                    "high":    [1.1, 0, 0],
+                },
+                "euler": {
+                    "center": [0, 0, 0],
+                    "low":    [0, 0, 0],
+                    "high":   [0, 0, 0],
+                },
+            },
+            "kettle0": {
+                "pos": {
+                    "center":  None, # use desk randomzied pos
+                    "low":     [-.2, -.3, 1.626],
+                    "high":    [.4, 0.3, 1.626]
+                },
+                "euler": {
+                    "center": [0, 0, 0],
+                    "low":    [0, 0, 0],
+                    "high":   [0, 0, 0],
+                },
+            }
+        }
+
+        self.texture_modder = TextureModder(self.sim)
+        self.texture_rand_kwargs = {
+            'tex_ids': [1, 5, 6, 7, 10, 11, 12, 13, 14, 16],
+            'tex_names': {
+                'surface': [
+                    'wood',
+                    'stone',
+                    ],
+                'handle': [
+                    'metal',
+                    ],
+                'floor': [
+                    'tile'
+                    ],
+                },
+            'tex_path':  TEX_DIR + "/assets/textures/*/*.png",
+            }
+        self.joints_rand_kwargs = {
+            'num_objects': 7,
+            'non_target_objects': [obj for obj in OBJ_LIST if obj not in self.input_obj_goal.keys()]
+        }
+
+    def set_augment_kwargs(self, aug_kwargs):
+        self.augment_types = aug_kwargs.get('augment_types', [])
+
+        body_rand_kwargs = aug_kwargs.get('body', None) 
+        if body_rand_kwargs is not None:
+            self.body_rand_kwargs.update(body_rand_kwargs)
+        
+        texture_rand_kwargs = aug_kwargs.get('texture', None)
+        if texture_rand_kwargs is not None:
+            self.texture_rand_kwargs.update(texture_rand_kwargs)
+        
+        joints_rand_kwargs = aug_kwargs.get('joints', None)
+        if joints_rand_kwargs is not None:
+            self.joints_rand_kwargs.update(joints_rand_kwargs)
+
+    def randomize_body_pose(self):
+        def body_rand(name):
+            kwargs = self.body_rand_kwargs.get(name, None)
+            assert kwargs is not None, "body {} not found in body_rand_kwargs".format(name)
+            pos = np.array(kwargs['pos']['center']) + \
+                self.np_random.uniform(low=kwargs['pos']['low'], high=kwargs['pos']['high'])
+
+            euler = np.array(kwargs['euler']['center']) + \
+                self.np_random.uniform(low=kwargs['euler']['low'], high=kwargs['euler']['high'])
+            
+            bid = self.sim.model.body_name2id(name)
+            self.sim.model.body_pos[bid] = pos
+            self.sim.model.body_quat[bid] = euler2quat(euler)
+            return pos, euler
+
+        # dk_pos, _ = body_rand('desk')
+        body_rand('microwave')
+        hc_pos, _  = body_rand('hingecabinet')
+
+        self.body_rand_kwargs['slidecabinet']['pos']['center'] = hc_pos
+        body_rand('slidecabinet')
+
+        # self.body_rand_kwargs['kettle0']['pos']['center'] = dk_pos
+        # body_rand('kettle0')
+
+    def randomize_texture(self):
+        def set_bitmap(tex_id, modder, new_bitmap):
+            texture = modder.textures[tex_id]
+            curr_bitmap = texture.bitmap
+            assert curr_bitmap.dtype == new_bitmap.dtype and curr_bitmap.shape == new_bitmap.shape, \
+                 f'Incoming bitmap shape and dtype does not match current bitmap'
+            modder.textures[tex_id].bitmap[:] = new_bitmap
+            
+            if not modder.sim.render_contexts:
+                cymj.MjRenderContextOffscreen(modder.sim)
+            for render_context in modder.sim.render_contexts:
+                render_context.upload_texture(texture.id)
+            return 
+
+        tex_ids = self.texture_rand_kwargs.get('tex_ids', [])
+        tex_files = glob(self.texture_rand_kwargs['tex_path'])
+        assert len(tex_files) > 0, "No texture files found"
+        for tex_id in tex_ids:
+            tex_info = TEXTURE_ID_TO_INFOS.get(tex_id, None)
+            assert tex_info is not None, f'ID {tex_id} not found'
+            texture_keys = self.texture_rand_kwargs['tex_names'].get(tex_info['group'], None)
+            assert texture_keys is not None, f"Texture group {tex_info['group']} not found"
+            found_files = [
+                f for f in tex_files if any([t in f for t in texture_keys])
+            ]
+
+            fname = random.choice(found_files)
+            new_tex = PIL.Image.open(fname).convert('RGB')
+
+            if np.asarray(new_tex).shape != tex_info['shape']:
+                new_tex = new_tex.resize(
+                    (tex_info['shape'][0], tex_info['shape'][1])
+                    )
+
+            new_tex = np.asarray(new_tex, dtype=np.uint8)
+            set_bitmap(tex_id, self.texture_modder, new_tex)
+        return 
+
+    def randomize_object_joints(self):
+        object_keys = self.joints_rand_kwargs.get('non_target_objects', [])
+        num_objects = self.joints_rand_kwargs.get('num_objects', 0)
+        assert len(object_keys) > 0, "No non-target objects found"
+        side_objs = random.sample(object_keys, num_objects)
+        new_vals = []
+        for side_obj in side_objs:
+            val_range = OBJ_JNT_RANGE[side_obj]
+            dof_adr = self.obj[side_obj]["dof_adr"] 
+            new_val = np.random.uniform(low=val_range[0], high=val_range[1])
+            new_vals.append( (dof_adr, new_val) )
+
+        env_state = self.get_env_state()
+        for (dof_adr, new_val) in new_vals:
+            env_state['qpos'][dof_adr] = new_val
+        
+        self.set_state(
+                qpos=env_state['qpos'], 
+                qvel=env_state['qvel']
+                )
+        return 
+
+        
+
+    def reset(self, reset_qpos=None, reset_qvel=None):
+        # random reset of robot initial pos 
+
+        if reset_qpos is None:
+            reset_qpos = self.init_qpos.copy()
+            reset_qpos[self.robot_dofs] += (
+                0.05
+                * (self.np_random.uniform(size=len(self.robot_dofs)) - 0.5)
+                * (self.robot_ranges[:, 1] - self.robot_ranges[:, 0])
+            )
+        super().reset(reset_qpos=reset_qpos, reset_qvel=reset_qvel)
+
+        # if 'body' in self.augment_types:
+        #     self.randomize_body_pose()
+        if 'texture' in self.augment_types:
+            self.randomize_texture()
+        
+        if 'joint' in self.augment_types:
+            self.randomize_object_joints()
+
+        
+        return self.get_obs()
+
