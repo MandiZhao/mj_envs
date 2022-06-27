@@ -9,6 +9,8 @@ import gym
 import numpy as np
 import os
 import time as timer
+import torch
+import torchvision.transforms as T
 
 from mj_envs.utils.obj_vec_dict import ObsVecDict
 from mj_envs.utils import tensor_utils
@@ -16,11 +18,12 @@ from mj_envs.robot.robot import Robot
 from os import path
 import skvideo.io
 
+from r3m import load_r3m
+
 # TODO
 # remove rwd_mode
 # convet obs_keys to obs_keys_wt
-# Seed the random number generator in the __init__
-# Pass model_path and model_obsd_path to the __init__ so the use has a choice to make partially observed envs
+# batch images before passing them through the encoder
 
 try:
     import mujoco_py
@@ -46,6 +49,13 @@ def get_sim(model_path:str=None, model_xmlstr=None):
         raise TypeError("Both model_path and model_xmlstr can't be None")
 
     return MjSim(model)
+
+class IdentityEncoder(torch.nn.Module):
+    def __init__(self):
+        super(IdentityEncoder, self).__init__()
+
+    def forward(self, x):
+        return x
 
 class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
     """
@@ -127,12 +137,64 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
         # resolve obs
         self.obs_dict = {}
         self.obs_keys = obs_keys
+        self._setup_rgb_encoders(obs_keys, device=None)
         observation, _reward, done, _info = self.step(np.zeros(self.sim.model.nu))
         assert not done, "Check initialization. Simulation starts in a done state."
         self.obs_dim = observation.size
         self.observation_space = gym.spaces.Box(obs_range[0]*np.ones(self.obs_dim), obs_range[1]*np.ones(self.obs_dim), dtype=np.float32)
 
         return
+
+    def _setup_rgb_encoders(self, obs_keys, device=None):
+        """
+        Setup the supported visual encoders: flat/ r3m18/ r3m34/ r3m50
+        """
+        if device is None:
+            self.device_encoder = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device_encoder=device
+
+        # ensure that all keys use the same encoder and image sizes
+        id_encoders = []
+        for key in obs_keys:
+            if key.startswith('rgb'):
+                id_encoder = key.split(':')[-2]+":"+key.split(':')[-1] # HxW:encoder
+                id_encoders.append(id_encoder)
+        if len(id_encoders) > 1 :
+            unique_encoder = all(elem == id_encoders[0] for elem in id_encoders)
+            assert unique_encoder, "Env only supports single encoder. Multiple in use ({})".format(id_encoders)
+
+        # prepare encoder and transforms
+        self.rgb_encoder = None
+        self.rgb_transform = None
+        if len(id_encoders) > 0:
+            wxh, id_encoder = id_encoders[0].split(':')
+
+            # Load encoder
+            print("Using {} visual inputs with {} encoder".format(wxh, id_encoder))
+            if id_encoder == "flat":
+                self.rgb_encoder = IdentityEncoder()
+            elif id_encoder == "r3m18":
+                self.rgb_encoder = load_r3m("resnet18")
+            elif id_encoder == "r3m34":
+                self.rgb_encoder = load_r3m("resnet34")
+            elif id_encoder == "r3m50":
+                self.rgb_encoder = load_r3m("resnet50")
+            else:
+                raise ValueError("Unsupported visual encoder: {}".format(id_encoder))
+            self.rgb_encoder.eval()
+            self.rgb_encoder.to(self.device_encoder)
+
+            # Load tranfsormms
+            if id_encoder[:3] == 'r3m':
+                if wxh == "224x224":
+                    self.rgb_transform = T.Compose([T.ToTensor()]) # ToTensor() divides by 255
+                else:
+                    print("HxW = 224x224 recommended")
+                    self.rgb_transform = T.Compose([T.Resize(256),
+                                        T.CenterCrop(224),
+                                        T.ToTensor()]) # ToTensor() divides by 255
+
 
     def step(self, a):
         """
@@ -175,6 +237,9 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
 
         # get obs_dict using the observed information
         self.obs_dict = self.get_obs_dict(self.sim_obsd)
+        if self.rgb_encoder:
+            visual_obs_dict = self.get_visual_obs_dict(sim=self.sim_obsd)
+            self.obs_dict.update(visual_obs_dict)
 
         # recoved observation vector from the obs_dict
         t, obs = self.obsdict2obsvec(self.obs_dict, self.obs_keys)
@@ -183,18 +248,25 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
 
     def get_visual_obs_dict(self, sim, device_id=None):
         """
-        Recover visual observation dict corresponding to the 'rgba:cam_name:HxW' keys in obs_keys
+        Recover visual observation dict corresponding to the visual keys in obs_keys
+        Acceptable visual keys:
+            - 'rgb:cam_name:HxW:flat'
+            - 'rgb:cam_name:HxW:r3m18'
+            - 'rgb:cam_name:HxW:r3m34'
+            - 'rgb:cam_name:HxW:r3m50'
         """
         if device_id is None:
             device_id = self.device_id
 
         visual_obs_dict = {}
         visual_obs_dict['t'] = np.array([self.sim.data.time])
+        # find keys with rgb tags
         for key in self.obs_keys:
             if key.startswith('rgb'):
-                cam = key.split(':')[1]
-                height = int(key.split(':')[2])
-                width = int(key.split(':')[3])
+                _, cam, wxh, rgb_encoder_id = key.split(':')
+                height = int(wxh.split('x')[0])
+                width = int(wxh.split('x')[1])
+                # render images ==> returns (ncams, height, width, 3)
                 img = self.render_camera_offscreen(
                                     height=height,
                                     width=width,
@@ -202,8 +274,18 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
                                     device_id=device_id,
                                     sim=sim,
                                   )
-                img = img.reshape(-1)
-                visual_obs_dict.update({key:img})
+                # encode images
+                if rgb_encoder_id == 'flat':
+                    rgb_encoded = img.reshape(-1)
+                elif rgb_encoder_id[:3] == 'r3m':
+                    with torch.no_grad():
+                        rgb_encoded = 255.0 * self.rgb_transform(img[0]).reshape(-1, 3, 224, 224)
+                        rgb_encoded.to(self.device_encoder)
+                        rgb_encoded = self.rgb_encoder(rgb_encoded).cpu().numpy()
+                        rgb_encoded = np.squeeze(rgb_encoded)
+                else:
+                    raise ValueError("Unsupported visual encoder: {}".format(rgb_encoder_id))
+                visual_obs_dict.update({key:rgb_encoded})
         return visual_obs_dict
 
 
@@ -393,11 +475,6 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
         self.sim.model.body_quat[:] = state_dict['body_quat']
         self.sim.forward()
 
-    # def state_vector(self):
-    #     state = self.sim.get_state()
-    #     return np.concatenate([
-    #         state.qpos.flat, state.qvel.flat])
-
 
     # Vizualization utilities ================================================
 
@@ -411,7 +488,6 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
             self.viewer.cam.elevation = -30
             self.viewer.cam.azimuth = 90
             self.viewer.cam.distance = 2.5
-            # self.viewer.lookat = np.array([-0.15602934,  0.32243594,  0.70929817])
             #self.viewer._run_speed /= self.frame_skip
             self.viewer_setup()
             self.viewer.render()
@@ -434,6 +510,7 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
             camera.elevation = elevation
         if lookat is not None:
             camera.lookat[:] = lookat
+
 
     def render_camera_offscreen(self, cameras:list, width:int=640, height:int=480, device_id:int=0, sim=None):
         """
@@ -543,7 +620,9 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
         """
         Get observation dictionary
         Implement this in each subclass.
-        If visual keys (rgba:cam_name:HxW) are present use get_visual_obs_dict() to get visual inputs, process it (typically passed through an encoder to reduce dims), and then update the obs_dict. For example
+        Note: for visual keys (rgb:cam_name:HxW:encoder) use get_visual_obs_dict()
+            to get visual inputs, process it (typically passed through an encoder
+            to reduce dims), and then update the obs_dict. For example -
             > visual_obs_dict = self.get_visual_obs_dict(sim=sim)
             > obs_dict.update(visual_obs_dict)
         """
