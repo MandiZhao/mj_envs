@@ -111,7 +111,7 @@ register(
 # distance between end effector and all relevent objects in the scene
 
 print("RS:> Registering Kitchen Envs")
-
+print("Resgistering Kitchen from multi_task/substeps1")
 from mj_envs.envs.multi_task.common.franka_kitchen_v1 import KitchenFrankaFixed, KitchenFrankaRandom, KitchenFrankaDemo
 
 MODEL_PATH = CURR_DIR + "/../common/kitchen/franka_kitchen.xml"

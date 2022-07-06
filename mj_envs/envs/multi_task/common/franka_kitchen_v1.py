@@ -17,6 +17,7 @@ import os
 from mujoco_py import cymj
 from glob import glob 
 import random
+from copy import deepcopy
 
 # ToDo: Get these details from key_frame
 DEMO_RESET_QPOS = np.array(
@@ -246,65 +247,68 @@ TEXTURE_ID_TO_INFOS = {
     ),
     13: dict(
         name='lrdoor_handle', 
-        shape=(512,512,3),
+        shape=(512, 512, 3),
         group='handle',
     ),
     14: dict(
         name='micro_handle', 
-        shape=(1024,1024,3),
+        shape=(512, 512, 3),
         group='handle',
     ),
     
     16: dict(
         name='kettle_handle', 
-        shape=(512,512,3),
+        shape=(512, 512, 3),
         group='handle',
     ),
 }
-TEX_DIR = '/Users/mandizhao/mj_envs/mj_envs/envs/relay_kitchen'
+TEX_DIR = '/Users/mandizhao/mj_envs/mj_envs/envs/multi_task/common/kitchen/'
 OBJ_JNT_RANGE = {
-    'lightswitch_joint': (-0.7, 0), 
-    'rightdoorhinge': (0, 1.57), 
-    'slidedoor_joint': (0, 0.44), 
-    'leftdoorhinge': (-1.25, 0), 
-    'micro0joint': (-1.25, 0), 
-    'knob1_joint': (0, -1.57), 
-    'knob2_joint': (0, -1.57),   
-    'knob3_joint': (-1.57, 0), 
-    'knob4_joint': (-1.57, 0), 
+    'lightswitch_joint': (-0.6, 0), 
+    'rightdoorhinge': (0, 1.4), 
+    'slidedoor_joint': (0, 0.3), 
+    'leftdoorhinge': (-1, 0), 
+    'micro0joint': (-1, 0), 
+    'knob1_joint': (0, -1), 
+    'knob2_joint': (0, -1),   
+    'knob3_joint': (-1, 0), 
+    'knob4_joint': (-1, 0), 
 }
 OBJ_LIST = list(OBJ_JNT_RANGE.keys())
 
-class KitchenFrankaAugment(KitchenFrankaFixed):
-
-    def __init__(self, model_path, obsd_model_path=None, seed=None, **kwargs):
-
-        gym.utils.EzPickle.__init__(self, model_path, obsd_model_path, seed, **kwargs)
-        super().__init__(model_path=model_path, obsd_model_path=obsd_model_path, seed=seed)
-        super()._setup(**kwargs)
-
-        self.augment_types = []
-        self.body_rand_kwargs = {
-            "desk": {
+DEFAULT_BODY_RANGE = {
+            # "kitchen1": {
+            #     "pos": {
+            #         "center": [-0.1, 0.75, 0],
+            #         "low":    [-.1, -.1, -.1],
+            #         "high":   [.1, .1, .1],
+            #         },
+            #     "euler": {
+            #         "center": [0, 0, 0],
+            #         "low":    [0, 0, -.15],
+            #         "high":   [0, 0, .15],
+            #         },             
+            # },
+            "counters": { # note this includes both left counter and right sink
                 "pos": {
-                    "center": [-0.1, 0.75, 0],
-                    "low":    [-.1, -.1, -.1],
-                    "high":   [.1, .1, .1],
-                    },
+                    "center": [0, 0, 0],
+                    "low":    [0, -.4, 0],
+                    "high":   [0, .4, 0],
+                },
                 "euler": {
                     "center": [0, 0, 0],
-                    "low":    [0, 0, -.15],
-                    "high":   [0, 0, .15],
-                    },             
+                    "low":    [0, 0, 0],
+                    "high":   [0, 0, 0],
+                }
             },
             "microwave": {
                 "pos": {
                     "center": [-0.750, -0.025, 1.6],
-                    "low":    [-.1, -.1, 0],
-                    "high":   [.1, .1, .1],            
+                    "low":    [-.1, -.07, 0],
+                    "high":   [0.05, 0.075,0],            
                     },
                 "euler": {
-                    "center": [0, 0, .785],
+                    "center": [0, 0, 0.3],
                     "low":    [0, 0, -.15],
                     "high":   [0, 0, .15],
                 },
@@ -313,7 +317,7 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                 "pos": {
                     "center": [-0.504, 0.28, 2.6],
                     "low":    [-.1, -.1, 0],
-                    "high":   [.1, .1, .1],
+                    "high":   [0, .05, .1],
                 },
                 "euler": {
                     "center": [0, 0, 0],
@@ -323,9 +327,9 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             },
             "slidecabinet": {
                 "pos": {
-                    "center":  None,  # use hingecabinet randomzied pos
-                    "low":     [.904, 0, 0],
-                    "high":    [1.1, 0, 0],
+                    "center":  [0.4, 0.28, 2.6], #None,  # use hingecabinet randomzied pos
+                    "low":     [0, 0, 0],
+                    "high":    [0.1, 0, 0],
                 },
                 "euler": {
                     "center": [0, 0, 0],
@@ -335,9 +339,9 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             },
             "kettle0": {
                 "pos": {
-                    "center":  None, # use desk randomzied pos
-                    "low":     [-.2, -.3, 1.626],
-                    "high":    [.4, 0.3, 1.626]
+                    "center":  [-0.269, 0.35, 1.626],  
+                    "low":     [0, 0, 0],
+                    "high":    [0.5, 0.45, 0],
                 },
                 "euler": {
                     "center": [0, 0, 0],
@@ -346,7 +350,17 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                 },
             }
         }
+class KitchenFrankaAugment(KitchenFrankaFixed):
 
+    def __init__(self, model_path, obsd_model_path=None, seed=None, **kwargs):
+
+        gym.utils.EzPickle.__init__(self, model_path, obsd_model_path, seed, **kwargs)
+        super().__init__(model_path=model_path, obsd_model_path=obsd_model_path, seed=seed)
+        super()._setup(**kwargs)
+
+        # set default kwargs for randomization
+        self.augment_types = []
+        self.body_rand_kwargs = DEFAULT_BODY_RANGE
         self.texture_modder = TextureModder(self.sim)
         self.texture_rand_kwargs = {
             'tex_ids': [1, 5, 6, 7, 10, 11, 12, 13, 14, 16],
@@ -362,27 +376,50 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                     'tile'
                     ],
                 },
-            'tex_path':  TEX_DIR + "/assets/textures/*/*.png",
+            'tex_path':  TEX_DIR + "/textures/*/*.png",
             }
         self.joints_rand_kwargs = {
             'num_objects': 7,
             'non_target_objects': [obj for obj in OBJ_LIST if obj not in self.input_obj_goal.keys()]
         }
+        self.light_rand_kwargs = {
+            'ambient': {
+                'low': -0.1,
+                'high': 0.2,
+                'center': deepcopy(self.sim.model.light_ambient), 
+            },
+            'diffuse': {
+                'low': -0.3,
+                'high': 0.3,
+                'center': deepcopy(self.sim.model.light_diffuse),
+            },
+            'specular': {
+                'low': -10,
+                'high': 10,
+                'center': deepcopy(self.sim.model.light_specular),
+            }
+        }
+
 
     def set_augment_kwargs(self, aug_kwargs):
         self.augment_types = aug_kwargs.get('augment_types', [])
 
-        body_rand_kwargs = aug_kwargs.get('body', None) 
-        if body_rand_kwargs is not None:
-            self.body_rand_kwargs.update(body_rand_kwargs)
+        # override default kwargs
+        self.body_rand_kwargs.update(
+            aug_kwargs.get('body', {})) 
         
-        texture_rand_kwargs = aug_kwargs.get('texture', None)
-        if texture_rand_kwargs is not None:
-            self.texture_rand_kwargs.update(texture_rand_kwargs)
+        self.texture_rand_kwargs.update(
+            aug_kwargs.get('texture', {}))
+        if 'texture' in self.augment_types:
+            texture_files = glob(self.texture_rand_kwargs['tex_path'])
+            assert len(texture_files) > 0, "No texture files found at path: {}".format(self.texture_rand_kwargs['tex_path'])
         
-        joints_rand_kwargs = aug_kwargs.get('joints', None)
-        if joints_rand_kwargs is not None:
-            self.joints_rand_kwargs.update(joints_rand_kwargs)
+        self.joints_rand_kwargs.update(
+            aug_kwargs.get('joints', {}))
+
+        self.light_rand_kwargs.update(
+            aug_kwargs.get('light', {}))
+
 
     def randomize_body_pose(self):
         def body_rand(name):
@@ -401,20 +438,23 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
 
         # dk_pos, _ = body_rand('desk')
         body_rand('microwave')
-        hc_pos, _  = body_rand('hingecabinet')
+        #hc_pos, _  = body_rand('hingecabinet')
+        body_rand('counters')
+        body_rand('hingecabinet')
 
-        self.body_rand_kwargs['slidecabinet']['pos']['center'] = hc_pos
+        # self.body_rand_kwargs['slidecabinet']['pos']['center'] = hc_pos
         body_rand('slidecabinet')
 
         # self.body_rand_kwargs['kettle0']['pos']['center'] = dk_pos
         # body_rand('kettle0')
+        
 
     def randomize_texture(self):
         def set_bitmap(tex_id, modder, new_bitmap):
             texture = modder.textures[tex_id]
             curr_bitmap = texture.bitmap
             assert curr_bitmap.dtype == new_bitmap.dtype and curr_bitmap.shape == new_bitmap.shape, \
-                 f'Incoming bitmap shape and dtype does not match current bitmap'
+                 f'Texture ID: {tex_id}: Incoming bitmap shape {new_bitmap.shape} and dtype {new_bitmap.dtype} does not match current bitmap: {curr_bitmap.shape}, {curr_bitmap.dtype}'
             modder.textures[tex_id].bitmap[:] = new_bitmap
             
             if not modder.sim.render_contexts:
@@ -431,9 +471,7 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             assert tex_info is not None, f'ID {tex_id} not found'
             texture_keys = self.texture_rand_kwargs['tex_names'].get(tex_info['group'], None)
             assert texture_keys is not None, f"Texture group {tex_info['group']} not found"
-            found_files = [
-                f for f in tex_files if any([t in f for t in texture_keys])
-            ]
+            found_files = [f for f in tex_files if any([t in f for t in texture_keys])]
 
             fname = random.choice(found_files)
             new_tex = PIL.Image.open(fname).convert('RGB')
@@ -469,7 +507,29 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                 )
         return 
 
+    def randomize_lights(self):
+        for i in range(4):
+            if 'ambient' in self.light_rand_kwargs:
+                low = self.light_rand_kwargs['ambient']['low']
+                high = self.light_rand_kwargs['ambient']['high']
+                center = self.light_rand_kwargs['ambient']['center']
+                new_vals = np.random.uniform(low, high, size=1)
+                self.sim.model.light_ambient[i, :] = center[i] + new_vals
         
+            if 'diffuse' in self.light_rand_kwargs:
+                low = self.light_rand_kwargs['diffuse']['low']
+                high = self.light_rand_kwargs['diffuse']['high']
+                center = self.light_rand_kwargs['diffuse']['center']
+                new_vals = np.random.uniform(low, high, size=1)
+                self.sim.model.light_diffuse[i, :] = center[i] + new_vals
+            
+            if 'specular' in self.light_rand_kwargs:
+                low = self.light_rand_kwargs['specular']['low']
+                high = self.light_rand_kwargs['specular']['high']
+                center = self.light_rand_kwargs['specular']['center']
+                new_vals = np.random.uniform(low, high, size=1)
+                self.sim.model.light_specular[i, :] = center[i] + new_vals
+
 
     def reset(self, reset_qpos=None, reset_qvel=None):
         # random reset of robot initial pos 
@@ -483,14 +543,17 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             )
         super().reset(reset_qpos=reset_qpos, reset_qvel=reset_qvel)
 
-        # if 'body' in self.augment_types:
-        #     self.randomize_body_pose()
+        if 'body' in self.augment_types:
+            self.randomize_body_pose()
+
         if 'texture' in self.augment_types:
             self.randomize_texture()
         
         if 'joint' in self.augment_types:
             self.randomize_object_joints()
 
+        if 'light' in self.augment_types:
+            self.randomize_lights()
+
         
         return self.get_obs()
-
