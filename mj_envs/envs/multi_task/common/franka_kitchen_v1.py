@@ -17,6 +17,7 @@ import os
 from mujoco_py import cymj
 from glob import glob 
 import random
+import mujoco_py
 from copy import deepcopy
 
 # ToDo: Get these details from key_frame
@@ -263,14 +264,30 @@ TEXTURE_ID_TO_INFOS = {
     ),
 }
 TEX_DIR = '/Users/mandizhao/mj_envs/mj_envs/envs/multi_task/common/kitchen/'
+DEFAULT_TEXTURE_KWARGS = {
+    'tex_ids': [1, 5, 6, 7, 10, 11, 12, 13, 14, 16],
+    'tex_names': {
+        'surface': [
+            'wood',
+            'stone',
+            ],
+        'handle': [
+            'metal',
+            ],
+        'floor': [
+            'tile'
+            ],
+        },
+    'tex_path':  TEX_DIR + "/textures/*/*.png",
+    }
 OBJ_JNT_RANGE = {
     'lightswitch_joint': (-0.6, 0), 
-    'rightdoorhinge': (0, 1.4), 
+    'rightdoorhinge': (0, 1), 
     'slidedoor_joint': (0, 0.3), 
     'leftdoorhinge': (-1, 0), 
     'micro0joint': (-1, 0), 
-    'knob1_joint': (0, -1), 
-    'knob2_joint': (0, -1),   
+    'knob1_joint': (-1, 0), 
+    'knob2_joint': (-1, 0),   
     'knob3_joint': (-1, 0), 
     'knob4_joint': (-1, 0), 
 }
@@ -350,6 +367,8 @@ DEFAULT_BODY_RANGE = {
                 },
             }
         }
+
+
 class KitchenFrankaAugment(KitchenFrankaFixed):
 
     def __init__(self, model_path, obsd_model_path=None, seed=None, **kwargs):
@@ -362,26 +381,14 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         self.augment_types = []
         self.body_rand_kwargs = DEFAULT_BODY_RANGE
         self.texture_modder = TextureModder(self.sim)
-        self.texture_rand_kwargs = {
-            'tex_ids': [1, 5, 6, 7, 10, 11, 12, 13, 14, 16],
-            'tex_names': {
-                'surface': [
-                    'wood',
-                    'stone',
-                    ],
-                'handle': [
-                    'metal',
-                    ],
-                'floor': [
-                    'tile'
-                    ],
-                },
-            'tex_path':  TEX_DIR + "/textures/*/*.png",
-            }
+        self.texture_rand_kwargs = DEFAULT_TEXTURE_KWARGS 
+        self.original_obj_goals = deepcopy(self.obj_goal) # save original obj_goal!
         self.joints_rand_kwargs = {
             'num_objects': 7,
             'non_target_objects': [obj for obj in OBJ_LIST if obj not in self.input_obj_goal.keys()]
         }
+        
+
         self.light_rand_kwargs = {
             'ambient': {
                 'low': -0.1,
@@ -400,6 +407,8 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             }
         }
 
+        self.goal = None 
+
 
     def set_augment_kwargs(self, aug_kwargs):
         self.augment_types = aug_kwargs.get('augment_types', [])
@@ -415,7 +424,7 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             assert len(texture_files) > 0, "No texture files found at path: {}".format(self.texture_rand_kwargs['tex_path'])
         
         self.joints_rand_kwargs.update(
-            aug_kwargs.get('joints', {}))
+            aug_kwargs.get('joint', {}))
 
         self.light_rand_kwargs.update(
             aug_kwargs.get('light', {}))
@@ -441,13 +450,10 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         #hc_pos, _  = body_rand('hingecabinet')
         body_rand('counters')
         body_rand('hingecabinet')
-
         # self.body_rand_kwargs['slidecabinet']['pos']['center'] = hc_pos
-        body_rand('slidecabinet')
-
+        body_rand('slidecabinet') 
         # self.body_rand_kwargs['kettle0']['pos']['center'] = dk_pos
         # body_rand('kettle0')
-        
 
     def randomize_texture(self):
         def set_bitmap(tex_id, modder, new_bitmap):
@@ -491,18 +497,31 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         assert len(object_keys) > 0, "No non-target objects found"
         side_objs = random.sample(object_keys, num_objects)
         new_vals = []
-        for side_obj in side_objs:
-            val_range = OBJ_JNT_RANGE[side_obj]
-            dof_adr = self.obj[side_obj]["dof_adr"] 
+        for side_obj_name in side_objs:
+            val_range = OBJ_JNT_RANGE[side_obj_name]
+            dof_adr = self.obj[side_obj_name]["dof_adr"] 
             new_val = np.random.uniform(low=val_range[0], high=val_range[1])
-            new_vals.append( (dof_adr, new_val) )
+            new_vals.append( (side_obj_name, dof_adr, new_val) )
 
         env_state = self.get_env_state()
-        for (dof_adr, new_val) in new_vals:
+        new_obj_goal = deepcopy(self.original_obj_goals)
+        for (side_obj_name, dof_adr, new_val) in new_vals: 
             env_state['qpos'][dof_adr] = new_val
+            # NOTE: need to also reset the goal joint for each randomized side object
+            goal_adr = self.obj[side_obj_name]["goal_adr"]
+            # print(f'{side_obj_name}: old: {new_obj_goal[goal_adr]}, new goal {new_val}')
+            new_obj_goal[goal_adr] = new_val
+            
         
+        self.set_obj_goal(obj_goal=new_obj_goal)
+
         self.set_state(
                 qpos=env_state['qpos'], 
+                qvel=env_state['qvel']
+                )
+
+        self.set_sim_obsd_state(
+                qpos=env_state['qpos'],
                 qvel=env_state['qvel']
                 )
         return 
@@ -530,7 +549,6 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                 new_vals = np.random.uniform(low, high, size=1)
                 self.sim.model.light_specular[i, :] = center[i] + new_vals
 
-
     def reset(self, reset_qpos=None, reset_qvel=None):
         # random reset of robot initial pos 
 
@@ -554,6 +572,73 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
 
         if 'light' in self.augment_types:
             self.randomize_lights()
-
         
         return self.get_obs()
+
+    def set_sim_obsd_state(self, qpos=None, qvel=None, act=None):
+        """
+        Set MuJoCo sim_obsd state
+        """
+        sim = self.sim_obsd
+        assert qpos.shape == (sim.model.nq,) and qvel.shape == (sim.model.nv,)
+        old_state = sim.get_state()
+        if qpos is None:
+            qpos = old_state.qpos
+        if qvel is None:
+            qvel = old_state.qvel
+        if act is None:
+            act = old_state.act
+        new_state = mujoco_py.MjSimState(old_state.time, qpos=qpos, qvel=qvel, act=act, udd_state={})
+        sim.set_state(new_state)
+        sim.forward()
+
+    def set_goal(
+        self, 
+        expert_traj, 
+        cameras=['left_cam'], 
+        goal_window=5, 
+        frame_size=(256, 256),
+        min_success_count=5,
+        device_id=0,
+        max_trials=10,
+        ):
+        """
+        Use at every self.reset(), takes in a single expert trajectory and 
+        replay the actions to render a goal image, such that we match the same randomization 
+        to get the goal image
+        """
+        assert type(expert_traj) is dict, "Expert trajectory must be a dictionary"
+        expert_actions = expert_traj['actions']
+        horizon = expert_actions.shape[0]
+        goal_tstep = np.random.randint(low=horizon-goal_window, high=horizon)
+        new_camera_imgs = None 
+        success_count = 0 
+        success = False 
+        trial_episodes = 0
+        goal_env = deepcopy(self)
+        for trial in range(max_trials):
+            goal_env = deepcopy(self)
+            for t, action in enumerate(expert_actions): 
+                next_o, rwd, done, next_env_info = goal_env.step(action)
+                if next_env_info.get('solved', False):
+                    success_count += 1
+                if t == goal_tstep and success_count >= min_success_count:
+                    success = True
+                    curr_frame = goal_env.render_camera_offscreen(
+                        sim=goal_env.sim,
+                        cameras=cameras,
+                        width=frame_size[0],
+                        height=frame_size[1],
+                        device_id=device_id
+                        ) 
+                    new_camera_imgs = {cam: curr_frame[i] for i, cam in enumerate(cameras)}
+            print("Trial {}: {}".format(trial, success_count))
+            del goal_env
+            if success:
+                break
+
+        if not success:
+            print("Failed to complete the task by replaying the expert actions")
+        self.goal_imgs = new_camera_imgs
+        
+        return new_camera_imgs
