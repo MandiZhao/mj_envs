@@ -492,8 +492,8 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             assert texture_keys is not None, f"Texture group {tex_info['group']} not found"
             found_files = [f for f in tex_files if any([t in f for t in texture_keys])]
 
-            fname = random.choice(found_files)
-            new_tex = PIL.Image.open(fname).convert('RGB')
+            fidx = self.np_random.randint(len(found_files))
+            new_tex = PIL.Image.open(found_files[fidx]).convert('RGB')
 
             if np.asarray(new_tex).shape != tex_info['shape']:
                 new_tex = new_tex.resize(
@@ -508,12 +508,12 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         object_keys = self.joints_rand_kwargs.get('non_target_objects', [])
         num_objects = self.joints_rand_kwargs.get('num_objects', 0)
         assert len(object_keys) > 0, "No non-target objects found"
-        side_objs = random.sample(object_keys, num_objects)
+        side_objs = list(self.np_random.choice(object_keys, num_objects, replace=False))
         new_vals = []
         for side_obj_name in side_objs:
             val_range = OBJ_JNT_RANGE[side_obj_name]
             dof_adr = self.obj[side_obj_name]["dof_adr"] 
-            new_val = np.random.uniform(low=val_range[0], high=val_range[1])
+            new_val = self.np_random.uniform(low=val_range[0], high=val_range[1])
             new_vals.append( (side_obj_name, dof_adr, new_val) )
 
         env_state = self.get_env_state()
@@ -545,21 +545,21 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                 low = self.light_rand_kwargs['ambient']['low']
                 high = self.light_rand_kwargs['ambient']['high']
                 center = self.light_rand_kwargs['ambient']['center']
-                new_vals = np.random.uniform(low, high, size=1)
+                new_vals = self.np_random.uniform(low, high, size=1)
                 self.sim.model.light_ambient[i, :] = center[i] + new_vals
         
             if 'diffuse' in self.light_rand_kwargs:
                 low = self.light_rand_kwargs['diffuse']['low']
                 high = self.light_rand_kwargs['diffuse']['high']
                 center = self.light_rand_kwargs['diffuse']['center']
-                new_vals = np.random.uniform(low, high, size=1)
+                new_vals = self.np_random.uniform(low, high, size=1)
                 self.sim.model.light_diffuse[i, :] = center[i] + new_vals
             
             if 'specular' in self.light_rand_kwargs:
                 low = self.light_rand_kwargs['specular']['low']
                 high = self.light_rand_kwargs['specular']['high']
                 center = self.light_rand_kwargs['specular']['center']
-                new_vals = np.random.uniform(low, high, size=1)
+                new_vals = self.np_random.uniform(low, high, size=1)
                 self.sim.model.light_specular[i, :] = center[i] + new_vals
 
     def reset(self, reset_qpos=None, reset_qvel=None):
@@ -648,7 +648,7 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         assert type(expert_traj) is dict, "Expert trajectory must be a dictionary"
         expert_actions = expert_traj['actions']
         horizon = expert_actions.shape[0]
-        goal_tstep = np.random.randint(low=horizon-goal_window, high=horizon)
+        goal_tstep = self.np_random.randint(low=horizon-goal_window, high=horizon)
         new_camera_imgs = None 
         success_count = 0 
         goal_set = False 
