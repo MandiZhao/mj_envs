@@ -429,6 +429,14 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         self.light_rand_kwargs.update(
             aug_kwargs.get('light', {}))
 
+    def get_augment_kwargs(self):
+        return {
+            'augment_types': self.augment_types,
+            'body': self.body_rand_kwargs,
+            'texture': self.texture_rand_kwargs,
+            'joint': self.joints_rand_kwargs,
+            'light': self.light_rand_kwargs,
+        }
 
     def randomize_body_pose(self):
         def body_rand(name):
@@ -446,14 +454,19 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             return pos, euler
 
         # dk_pos, _ = body_rand('desk')
-        body_rand('microwave')
+        if 'micro0joint' not in self.input_obj_goal.keys():
+            body_rand('microwave')
         #hc_pos, _  = body_rand('hingecabinet')
         body_rand('counters')
-        body_rand('hingecabinet')
+
+        if 'leftdoorhinge' not in self.input_obj_goal.keys() and \
+            'rightdoorhinge' not in self.input_obj_goal.keys():
+            body_rand('hingecabinet')
         # self.body_rand_kwargs['slidecabinet']['pos']['center'] = hc_pos
-        body_rand('slidecabinet') 
+        if 'slidedoor_joint' not in self.input_obj_goal.keys():
+            body_rand('slidecabinet') 
         # self.body_rand_kwargs['kettle0']['pos']['center'] = dk_pos
-        # body_rand('kettle0')
+        body_rand('kettle0')
 
     def randomize_texture(self):
         def set_bitmap(tex_id, modder, new_bitmap):
@@ -592,20 +605,45 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         sim.set_state(new_state)
         sim.forward()
 
+    def make_copy_env(self):
+        copy_env = deepcopy(self)
+
+        # match texture
+        for tex_id in self.texture_rand_kwargs.get('tex_ids', []):
+            copy_env.texture_modder.textures[tex_id].bitmap[:] = self.texture_modder.textures[tex_id].bitmap
+        
+        # match qpos and qvel
+        qpos, qvel = self.get_env_state()['qpos'], self.get_env_state()['qvel']
+        copy_env.set_state(qpos=qpos, qvel=qvel)
+        copy_env.set_sim_obsd_state(qpos=qpos, qvel=qvel)
+        copy_env.set_obj_goal(self.obj_goal)
+        
+        # match lightings
+        copy_env.sim.model.light_specular[:] = self.sim.model.light_specular
+        copy_env.sim.model.light_diffuse[:] = self.sim.model.light_diffuse
+        copy_env.sim.model.light_ambient[:] = self.sim.model.light_ambient
+
+        # match body pose
+        copy_env.sim.model.body_pos[:] = self.sim.model.body_pos
+        copy_env.sim.model.body_quat[:] = self.sim.model.body_quat
+
+        return copy_env
+
     def set_goal(
         self, 
         expert_traj, 
-        cameras=['left_cam'], 
+        cameras=['left_cam', 'right_cam'], 
         goal_window=5, 
         frame_size=(256, 256),
         min_success_count=5,
         device_id=0,
         max_trials=10,
+        verbose=False,
         ):
         """
-        Use at every self.reset(), takes in a single expert trajectory and 
-        replay the actions to render a goal image, such that we match the same randomization 
-        to get the goal image
+        Use for online evaluation, such that the goal image gets applied the sample randomization.
+        Call env.set_goal(**kwargs) after every self.reset(). Note that this method calls another reset() to the randomization 
+        Input takes in a single expert trajectory, replay the actions to render a goal image
         """
         assert type(expert_traj) is dict, "Expert trajectory must be a dictionary"
         expert_actions = expert_traj['actions']
@@ -613,17 +651,20 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         goal_tstep = np.random.randint(low=horizon-goal_window, high=horizon)
         new_camera_imgs = None 
         success_count = 0 
-        success = False 
-        trial_episodes = 0
-        goal_env = deepcopy(self)
+        goal_set = False 
+
+        
+        init_state = {key: v[0] for key, v in expert_traj['env_states'].items()}
+        self.reset(reset_qpos=init_state['qpos'], reset_qvel=init_state['qvel'])
+  
         for trial in range(max_trials):
-            goal_env = deepcopy(self)
+            goal_env = self.make_copy_env()
             for t, action in enumerate(expert_actions): 
                 next_o, rwd, done, next_env_info = goal_env.step(action)
                 if next_env_info.get('solved', False):
                     success_count += 1
                 if t == goal_tstep and success_count >= min_success_count:
-                    success = True
+                    goal_set = True
                     curr_frame = goal_env.render_camera_offscreen(
                         sim=goal_env.sim,
                         cameras=cameras,
@@ -632,13 +673,14 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                         device_id=device_id
                         ) 
                     new_camera_imgs = {cam: curr_frame[i] for i, cam in enumerate(cameras)}
-            print("Trial {}: {}".format(trial, success_count))
+            if verbose:
+                print("Trial {}: {}".format(trial, success_count))
             del goal_env
-            if success:
+            if goal_set:
                 break
 
-        if not success:
-            print("Failed to complete the task by replaying the expert actions")
+        if not goal_set:
+            raise ValueError("Failed to complete the task by replaying the expert actions")
         self.goal_imgs = new_camera_imgs
-        
+            
         return new_camera_imgs
