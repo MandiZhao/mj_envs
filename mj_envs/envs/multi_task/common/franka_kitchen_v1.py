@@ -7,9 +7,12 @@ License :: Under Apache License, Version 2.0 (the "License"); you may not use th
 
 import collections
 import gym
+import time, datetime
 import numpy as np
-
+import re 
 from mj_envs.envs.multi_task.multi_task_base_v1 import KitchenBase
+from mj_envs.envs.env_base import get_sim
+from mj_envs.utils.obj_vec_dict import ObsVecDict
 from mj_envs.utils.quat_math import euler2quat
 from mujoco_py.modder import TextureModder, LightModder
 import PIL.Image
@@ -19,124 +22,15 @@ from glob import glob
 import random
 import mujoco_py
 from copy import deepcopy
-
-# ToDo: Get these details from key_frame
-DEMO_RESET_QPOS = np.array(
-    [
-        1.01020992e-01,
-        -1.76349747e00,
-        1.88974607e00,
-        -2.47661710e00,
-        3.25189114e-01,
-        8.29094410e-01,
-        1.62463629e00,
-        3.99760380e-02,
-        3.99791002e-02,
-        2.45778156e-05,
-        2.95590127e-07,
-        2.45777410e-05,
-        2.95589217e-07,
-        2.45777410e-05,
-        2.95589217e-07,
-        2.45777410e-05,
-        2.95589217e-07,
-        2.16196258e-05,
-        5.08073663e-06,
-        0.00000000e00,
-        0.00000000e00,
-        0.00000000e00,
-        0.00000000e00,
-        -2.68999994e-01,
-        3.49999994e-01,
-        1.61928391e00,
-        6.89039584e-19,
-        -2.26122120e-05,
-        -8.87580375e-19,
-    ]
-)
-DEMO_RESET_QVEL = np.array(
-    [
-        -1.24094905e-02,
-        3.07730486e-04,
-        2.10558046e-02,
-        -2.11170651e-02,
-        1.28676305e-02,
-        2.64535546e-02,
-        -7.49515183e-03,
-        -1.34369839e-04,
-        2.50969693e-04,
-        1.06229627e-13,
-        7.14243539e-16,
-        1.06224762e-13,
-        7.19794728e-16,
-        1.06224762e-13,
-        7.21644648e-16,
-        1.06224762e-13,
-        7.14243539e-16,
-        -1.19464428e-16,
-        -1.47079926e-17,
-        0.00000000e00,
-        0.00000000e00,
-        0.00000000e00,
-        0.00000000e00,
-        2.93530267e-09,
-        -1.99505748e-18,
-        3.42031125e-14,
-        -4.39396125e-17,
-        6.64174740e-06,
-        3.52969879e-18,
-    ]
-)
+from mj_envs.envs.multi_task.common.constants import \
+    DEMO_RESET_QPOS, DEMO_RESET_QVEL, \
+    OBJ_INTERACTION_SITES, OBJ_JNT_NAMES, ROBOT_JNT_NAMES, \
+    TEXTURE_ID_TO_INFOS, OBJ_JNT_RANGE, DEFAULT_BODY_RANGE
 
 class KitchenFrankaFixed(KitchenBase):
-
-    OBJ_INTERACTION_SITES = (
-        "knob1_site",
-        "knob2_site",
-        "knob3_site",
-        "knob4_site",
-        "light_site",
-        "slide_site",
-        "leftdoor_site",
-        "rightdoor_site",
-        "microhandle_site",
-        "kettle_site0",
-        "kettle_site0",
-        "kettle_site0",
-        "kettle_site0",
-        "kettle_site0",
-        "kettle_site0",
-    )
-
-    OBJ_JNT_NAMES = (
-        "knob1_joint",
-        "knob2_joint",
-        "knob3_joint",
-        "knob4_joint",
-        "lightswitch_joint",
-        "slidedoor_joint",
-        "leftdoorhinge",
-        "rightdoorhinge",
-        "micro0joint",
-        "kettle0:Tx",
-        "kettle0:Ty",
-        "kettle0:Tz",
-        "kettle0:Rx",
-        "kettle0:Ry",
-        "kettle0:Rz",
-    )
-
-    ROBOT_JNT_NAMES = (
-        "panda0_joint1",
-        "panda0_joint2",
-        "panda0_joint3",
-        "panda0_joint4",
-        "panda0_joint5",
-        "panda0_joint6",
-        "panda0_joint7",
-        "panda0_finger_joint1",
-        "panda0_finger_joint2",
-    )
+    OBJ_INTERACTION_SITES = OBJ_INTERACTION_SITES
+    OBJ_JNT_NAMES = OBJ_JNT_NAMES
+    ROBOT_JNT_NAMES = ROBOT_JNT_NAMES
 
     def _setup(
         self,
@@ -210,59 +104,6 @@ class KitchenFrankaRandom(KitchenFrankaFixed):
             )
         return super().reset(reset_qpos=reset_qpos, reset_qvel=reset_qvel)
 
-TEXTURE_ID_TO_INFOS = {
-    1: dict(
-        name='floor', 
-        shape=(1024, 1024, 3), 
-        group='floor',
-    ),
-    5: dict(
-        name='sink_handle', 
-        shape=(512, 512, 3),
-        group='handle',
-    ),
-    6: dict(
-        name='sink_top', 
-        shape=(512,512,3),
-        group='surface',
-    ),
-    7: dict(
-        name='drawer', 
-        shape=(512,512,3),
-        group='surface',
-    ),
-    10: dict(
-        name='sdoor_handle', 
-        shape=(512,512,3),
-        group='handle',
-    ),
-    11: dict(
-        name='sdoor_surface', 
-        shape=(512,512,3),
-        group='surface',
-    ),
-    12: dict(
-        name='lrdoor_surface', 
-        shape=(512,512,3),
-        group='surface',
-    ),
-    13: dict(
-        name='lrdoor_handle', 
-        shape=(512, 512, 3),
-        group='handle',
-    ),
-    14: dict(
-        name='micro_handle', 
-        shape=(512, 512, 3),
-        group='handle',
-    ),
-    
-    16: dict(
-        name='kettle_handle', 
-        shape=(512, 512, 3),
-        group='handle',
-    ),
-}
 TEX_DIR = '/Users/mandizhao/mj_envs/mj_envs/envs/multi_task/common/kitchen/'
 DEFAULT_TEXTURE_KWARGS = {
     'tex_ids': [1, 5, 6, 7, 10, 11, 12, 13, 14, 16],
@@ -280,102 +121,46 @@ DEFAULT_TEXTURE_KWARGS = {
         },
     'tex_path':  TEX_DIR + "/textures/*/*.png",
     }
-OBJ_JNT_RANGE = {
-    'lightswitch_joint': (-0.6, 0), 
-    'rightdoorhinge': (0, 1), 
-    'slidedoor_joint': (0, 0.3), 
-    'leftdoorhinge': (-1, 0), 
-    'micro0joint': (-1, 0), 
-    'knob1_joint': (-1, 0), 
-    'knob2_joint': (-1, 0),   
-    'knob3_joint': (-1, 0), 
-    'knob4_joint': (-1, 0), 
-}
+
 OBJ_LIST = list(OBJ_JNT_RANGE.keys())
 
-DEFAULT_BODY_RANGE = {
-            # "kitchen1": {
-            #     "pos": {
-            #         "center": [-0.1, 0.75, 0],
-            #         "low":    [-.1, -.1, -.1],
-            #         "high":   [.1, .1, .1],
-            #         },
-            #     "euler": {
-            #         "center": [0, 0, 0],
-            #         "low":    [0, 0, -.15],
-            #         "high":   [0, 0, .15],
-            #         },             
-            # },
-            "counters": { # note this includes both left counter and right sink
-                "pos": {
-                    "center": [0, 0, 0],
-                    "low":    [0, -.4, 0],
-                    "high":   [0, .4, 0],
-                },
-                "euler": {
-                    "center": [0, 0, 0],
-                    "low":    [0, 0, 0],
-                    "high":   [0, 0, 0],
-                }
-            },
-            "microwave": {
-                "pos": {
-                    "center": [-0.750, -0.025, 1.6],
-                    "low":    [-.1, -.07, 0],
-                    "high":   [0.05, 0.075,0],            
-                    },
-                "euler": {
-                    "center": [0, 0, 0.3],
-                    "low":    [0, 0, -.15],
-                    "high":   [0, 0, .15],
-                },
-            },
-            "hingecabinet": {
-                "pos": {
-                    "center": [-0.504, 0.28, 2.6],
-                    "low":    [-.1, -.1, 0],
-                    "high":   [0, .05, .1],
-                },
-                "euler": {
-                    "center": [0, 0, 0],
-                    "low":    [0, 0, 0],
-                    "high":   [0, 0, 0],
-                },
-            },
-            "slidecabinet": {
-                "pos": {
-                    "center":  [0.4, 0.28, 2.6], #None,  # use hingecabinet randomzied pos
-                    "low":     [0, 0, 0],
-                    "high":    [0.1, 0, 0],
-                },
-                "euler": {
-                    "center": [0, 0, 0],
-                    "low":    [0, 0, 0],
-                    "high":   [0, 0, 0],
-                },
-            },
-            "kettle0": {
-                "pos": {
-                    "center":  [-0.269, 0.35, 1.626],  
-                    "low":     [0, 0, 0],
-                    "high":    [0.5, 0.45, 0],
-                },
-                "euler": {
-                    "center": [0, 0, 0],
-                    "low":    [0, 0, 0],
-                    "high":   [0, 0, 0],
-                },
-            }
-        }
 
+def randomize_appliances(model_path, np_random, write_local=True):
 
+    model_file = open(model_path, "r")
+    model_xml = model_file.read()
+    opt = np_random.randint(low=0, high=4)
+    model_xml = re.sub('microwave_body\d.xml','microwave_body{}.xml'.format(opt), model_xml)
+    opt = np_random.randint(low=0, high=8) 
+    model_xml = re.sub('kettle_body\d.xml','kettle_body{}.xml'.format(opt), model_xml)
+
+    processed_model_path = None
+    if write_local:
+        # Save new random xml
+        timestamp = datetime.datetime.now().strftime("%m%d_%H%M")
+        processed_model_path = model_path[:-4]+f"_random_{timestamp}.xml"
+        with open(processed_model_path, 'w') as file:
+            file.write(model_xml)
+
+    return processed_model_path
+    
 class KitchenFrankaAugment(KitchenFrankaFixed):
 
-    def __init__(self, model_path, obsd_model_path=None, seed=None, **kwargs):
-
+    def __init__(self, model_path, obsd_model_path=None, seed=None, resample_appliance=False, resample_layout=False, **kwargs):
+        """ Overwrites the init function in env_base.MujocoEnv """
         gym.utils.EzPickle.__init__(self, model_path, obsd_model_path, seed, **kwargs)
-        super().__init__(model_path=model_path, obsd_model_path=obsd_model_path, seed=seed)
+        self.seed(seed)
+        if resample_appliance:
+            model_path = randomize_appliances(model_path, self.np_random, write_local=True) 
+            assert obsd_model_path is None
+        self.sim = get_sim(model_path=model_path)
+        self.sim_obsd = get_sim(obsd_model_path) if obsd_model_path else get_sim(model_path=model_path)
+        self.sim.forward()
+        self.sim_obsd.forward() 
+        ObsVecDict.__init__(self)
+        
         super()._setup(**kwargs)
+
 
         # set default kwargs for randomization
         self.augment_types = []
@@ -388,7 +173,6 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             'non_target_objects': [obj for obj in OBJ_LIST if obj not in self.input_obj_goal.keys()]
         }
         
-
         self.light_rand_kwargs = {
             'ambient': {
                 'low': -0.1,
@@ -408,7 +192,10 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         }
 
         self.goal = None 
-
+        if resample_layout:
+            self.randomize_layout()
+            # TODO: save sim.model to xml file  
+ 
 
     def set_augment_kwargs(self, aug_kwargs):
         self.augment_types = aug_kwargs.get('augment_types', [])
@@ -439,6 +226,7 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         }
 
     def randomize_body_pose(self):
+        """ NOTE(Mandi): cannot use if randomize_layout() is used, would just set the body to original layout """
         def body_rand(name):
             kwargs = self.body_rand_kwargs.get(name, None)
             assert kwargs is not None, "body {} not found in body_rand_kwargs".format(name)
@@ -457,7 +245,8 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         if 'micro0joint' not in self.input_obj_goal.keys():
             body_rand('microwave')
         #hc_pos, _  = body_rand('hingecabinet')
-        body_rand('counters')
+        print('TODO: add back counters')
+        # body_rand('counters')
 
         if 'leftdoorhinge' not in self.input_obj_goal.keys() and \
             'rightdoorhinge' not in self.input_obj_goal.keys():
@@ -466,7 +255,7 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         if 'slidedoor_joint' not in self.input_obj_goal.keys():
             body_rand('slidecabinet') 
         # self.body_rand_kwargs['kettle0']['pos']['center'] = dk_pos
-        body_rand('kettle0')
+        body_rand('kettle')
 
     def randomize_texture(self):
         def set_bitmap(tex_id, modder, new_bitmap):
@@ -562,6 +351,113 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                 new_vals = self.np_random.uniform(low, high, size=1)
                 self.sim.model.light_specular[i, :] = center[i] + new_vals
 
+    def randomize_layout(self):
+        np_random = self.np_random
+        sim = self.sim
+        body_offset = {
+            'slidecabinet': {'pos':[0,0,0], 'euler':[0,0,0]},
+            'hingecabinet': {'pos':[0,0,0], 'euler':[0,0,0]},
+            'microwave': {'pos':[0,0,-0.2], 'euler':[0,0,0]},
+            'kettle': {'pos':[0,0,0.0], 'euler':[0,0,0]},
+        }
+
+        # Counter layout
+        layout = {
+                'sink': {
+                    'L': [-1.620, 0, 0],
+                    'R': [0, 0, 0]},
+                'island': {
+                    'L': [-.020, 0, 0],
+                    'R': [1.92, 0, 0]},
+        }
+        counter_loc = ['L', 'R']
+
+        # Appliance layout
+        app_xy = {
+            # Front pannel
+            'FL':[-.5, 0.28],
+            'FR':[.4, 0.28],
+            # Left pannel
+            'LL':[-1., -1.0],
+            'LR':[-1., -.25],
+            # Right pannel
+            'RL':[1., -.25],
+            'RR':[1., -1.0],
+        }
+        app_z = {
+                'T':[2.6],
+                'M':[2.2],
+                'B':[1.8],
+            }
+        app_xyz = {
+            # Front pannel
+            'FLT': {'pos':app_xy['FL']+app_z['T'], 'euler':[0,0,0], 'accept':True},
+            'FRT': {'pos':app_xy['FR']+app_z['T'], 'euler':[0,0,0], 'accept':True},
+            'FLM': {'pos':app_xy['FL']+app_z['M'], 'euler':[0,0,0], 'accept':False},
+            'FRM': {'pos':app_xy['FR']+app_z['M'], 'euler':[0,0,0], 'accept':False},
+            'FLB': {'pos':app_xy['FL']+app_z['B'], 'euler':[0,0,0], 'accept':False},
+            'FRB': {'pos':app_xy['FR']+app_z['B'], 'euler':[0,0,0], 'accept':False},
+            # Left pannel
+            'LLT': {'pos':app_xy['LL']+app_z['T'], 'euler':[0,0,1.57], 'accept':True},
+            'LRT': {'pos':app_xy['LR']+app_z['T'], 'euler':[0,0,1.57], 'accept':True},
+            'LLM': {'pos':app_xy['LL']+app_z['M'], 'euler':[0,0,1.57], 'accept':True},
+            'LRM': {'pos':app_xy['LR']+app_z['M'], 'euler':[0,0,1.57], 'accept':False},
+            'LLB': {'pos':app_xy['LL']+app_z['B'], 'euler':[0,0,1.57], 'accept':True},
+            'LRB': {'pos':app_xy['LR']+app_z['B'], 'euler':[0,0,1.57], 'accept':True},
+            # Right pannel
+            'RLT': {'pos':app_xy['RL']+app_z['T'], 'euler':[0,0,-1.57], 'accept':True},
+            'RRT': {'pos':app_xy['RR']+app_z['T'], 'euler':[0,0,-1.57], 'accept':True},
+            'RLM': {'pos':app_xy['RL']+app_z['M'], 'euler':[0,0,-1.57], 'accept':False},
+            'RRM': {'pos':app_xy['RR']+app_z['M'], 'euler':[0,0,-1.57], 'accept':True},
+            'RLB': {'pos':app_xy['RL']+app_z['B'], 'euler':[0,0,-1.57], 'accept':True},
+            'RRB': {'pos':app_xy['RR']+app_z['B'], 'euler':[0,0,-1.57], 'accept':True},
+        }
+        app_loc = [*app_xyz] # list of dict keys
+
+        # Randomize counter layouts
+        opt = np_random.randint(low=0, high=2)
+        sel_grid = counter_loc[opt]
+        # Place island
+        bid = sim.model.body_name2id('island')
+        sim.model.body_pos[bid] = layout['island'][sel_grid]
+        # # place sink
+        sel_grid = counter_loc[1-opt]
+        bid = sim.model.body_name2id('sink')
+        sim.model.body_pos[bid] = layout['sink'][sel_grid]
+        # Don't mount anything next to sink 
+        for side in ['L','R']:
+            app_xyz[sel_grid+side+'B']['accept'] = False
+
+        # Randomize Appliances
+        for body_name in ['slidecabinet', 'hingecabinet', 'microwave']:
+            # Find and empty slot
+            empty_slot = False
+            while not empty_slot:
+                opt = np_random.randint(low=0, high=len(app_loc))
+                sel_grid = app_loc[opt] 
+                empty_slot = True if app_xyz[sel_grid]['accept'] else False
+            bid = sim.model.body_name2id(body_name)
+            sim.model.body_pos[bid] = np.array(app_xyz[sel_grid]['pos'])+np.array(body_offset[body_name]['pos'])
+            sim.model.body_quat[bid] = euler2quat(np.array(app_xyz[sel_grid]['euler']) + np.array(body_offset[body_name]['euler']))
+            # mark occupied
+            app_xyz[sel_grid]['accept'] = False
+            # handle corner assignments
+            if sel_grid in ['LRT', 'FLT']:
+                app_xyz['LRT']['accept'] = app_xyz['FLT']['accept'] = False
+            if sel_grid in ['FRT', 'RLT']:
+                app_xyz['FRT']['accept'] = app_xyz['RLT']['accept'] = False
+
+        # move the kettle on the surface only 
+        kwargs = DEFAULT_BODY_RANGE['kettle']
+        pos = np.array(kwargs['pos']['center']) + \
+        self.np_random.uniform(low=kwargs['pos']['low'], high=kwargs['pos']['high'])
+
+        euler = np.array(kwargs['euler']['center']) + \
+            self.np_random.uniform(low=kwargs['euler']['low'], high=kwargs['euler']['high'])
+        bid = self.sim.model.body_name2id('kettle')
+        self.sim.model.body_pos[bid] = pos
+        self.sim.model.body_quat[bid] = euler2quat(euler)
+
     def reset(self, reset_qpos=None, reset_qvel=None):
         # random reset of robot initial pos 
 
@@ -573,9 +469,11 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
                 * (self.robot_ranges[:, 1] - self.robot_ranges[:, 0])
             )
         super().reset(reset_qpos=reset_qpos, reset_qvel=reset_qvel)
+        # if 'layout' in self.augment_types:
+        #     self.randomize_layout()
 
-        if 'body' in self.augment_types:
-            self.randomize_body_pose()
+        # if 'body' in self.augment_types:
+        #     self.randomize_body_pose()
 
         if 'texture' in self.augment_types:
             self.randomize_texture()

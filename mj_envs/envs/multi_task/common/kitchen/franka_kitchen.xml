@@ -58,9 +58,10 @@
         </body>
 
         <body name='kitchen1' pos='-0.1 0.75 0'>
-
-            <body name="counters" pos="0 0 0" >
+            <body name="sink" >
                 <include file="../../../../sims/furniture_sim/counters/sink_counter_body.xml"/>
+            </body>
+            <body name="island">
                 <include file="../../../../sims/furniture_sim/counters/box_counter_body.xml"/>
             </body>
             <body name="oven" pos="0 0 0" >
@@ -79,7 +80,7 @@
                 <include file="../../../../sims/furniture_sim/microwave/microwave_body0.xml"/>
             </body>
         </body>
-        <body name="kettle0" pos="-0.269 0.35 1.626">
+        <body name="kettle" pos="-0.269 0.35 1.626">
             <joint class="kettle" name="kettle0:Tx" axis="1 0 0" type="slide" range="-1.25 1.75" ref="-0.269"/>
             <joint class="kettle" name="kettle0:Ty" axis="0 1 0" type="slide" range="-1.50 1.50" ref="0.35"/>
             <joint class="kettle" name="kettle0:Tz" axis="0 0 1" type="slide" range="-0.10 2.90" ref="1.61523"/>
