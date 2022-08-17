@@ -9,7 +9,7 @@ from gym.envs.registration import register
 import os
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 
-print("RS:> Registering Hand Envs")
+# print("RS:> Registering Hand Envs")
 
 # ==================================================================================
 # V1 envs:

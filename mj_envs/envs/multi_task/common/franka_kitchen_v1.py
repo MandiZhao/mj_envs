@@ -104,7 +104,8 @@ class KitchenFrankaRandom(KitchenFrankaFixed):
             )
         return super().reset(reset_qpos=reset_qpos, reset_qvel=reset_qvel)
 
-TEX_DIR = '/Users/mandizhao/mj_envs/mj_envs/envs/multi_task/common/kitchen/'
+TEX_DIR = os.path.join(
+    os.path.abspath(os.path.dirname(__file__)), "kitchen") 
 DEFAULT_TEXTURE_KWARGS = {
     'tex_ids': [1, 5, 6, 7, 10, 11, 12, 13, 14, 16],
     'tex_names': {
@@ -125,7 +126,7 @@ DEFAULT_TEXTURE_KWARGS = {
 OBJ_LIST = list(OBJ_JNT_RANGE.keys())
 
 
-def randomize_appliances(model_path, np_random, write_local=True):
+def randomize_appliances(model_path, np_random, seed, write_local=True):
 
     model_file = open(model_path, "r")
     model_xml = model_file.read()
@@ -138,38 +139,45 @@ def randomize_appliances(model_path, np_random, write_local=True):
     if write_local:
         # Save new random xml
         timestamp = datetime.datetime.now().strftime("%m%d_%H%M")
-        processed_model_path = model_path[:-4]+f"_random_{timestamp}.xml"
-        with open(processed_model_path, 'w') as file:
-            file.write(model_xml)
+        processed_model_path = model_path[:-4]+f"_random_seed{seed}.xml"
+        # os check if file exists:
+        if not os.path.isfile(processed_model_path):
+            print('writing new model:', processed_model_path)
+            with open(processed_model_path, 'w') as file:
+                file.write(model_xml)
 
     return processed_model_path
     
 class KitchenFrankaAugment(KitchenFrankaFixed):
 
-    def __init__(self, model_path, obsd_model_path=None, seed=None, resample_appliance=False, resample_layout=False, **kwargs):
+    def __init__(
+            self, model_path, obsd_model_path=None, seed=None, 
+            sample_appliance=False, sample_layout=False, augment_types=[],
+            **kwargs):
         """ Overwrites the init function in env_base.MujocoEnv """
         gym.utils.EzPickle.__init__(self, model_path, obsd_model_path, seed, **kwargs)
         self.seed(seed)
-        if resample_appliance:
-            model_path = randomize_appliances(model_path, self.np_random, write_local=True) 
+        if sample_appliance:
+            model_path = randomize_appliances(model_path, self.np_random, seed=seed, write_local=True) 
             assert obsd_model_path is None
         self.sim = get_sim(model_path=model_path)
         self.sim_obsd = get_sim(obsd_model_path) if obsd_model_path else get_sim(model_path=model_path)
         self.sim.forward()
         self.sim_obsd.forward() 
         ObsVecDict.__init__(self)
+        self._model_path = model_path
         
         super()._setup(**kwargs)
 
 
         # set default kwargs for randomization
-        self.augment_types = []
+        self.augment_types = augment_types
         self.body_rand_kwargs = DEFAULT_BODY_RANGE
         self.texture_modder = TextureModder(self.sim)
         self.texture_rand_kwargs = DEFAULT_TEXTURE_KWARGS 
         self.original_obj_goals = deepcopy(self.obj_goal) # save original obj_goal!
         self.joints_rand_kwargs = {
-            'num_objects': 7,
+            'num_objects': 10,
             'non_target_objects': [obj for obj in OBJ_LIST if obj not in self.input_obj_goal.keys()]
         }
         
@@ -192,9 +200,11 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         }
 
         self.goal = None 
-        if resample_layout:
+        if sample_layout:
             self.randomize_layout()
             # TODO: save sim.model to xml file  
+        self.sample_appliance = sample_appliance
+        self.sample_layout = sample_layout
  
 
     def set_augment_kwargs(self, aug_kwargs):
@@ -225,6 +235,9 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
             'light': self.light_rand_kwargs,
         }
 
+    def get_model_path(self):
+        return self._model_path
+        
     def randomize_body_pose(self):
         """ NOTE(Mandi): cannot use if randomize_layout() is used, would just set the body to original layout """
         def body_rand(name):
@@ -375,11 +388,11 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
         # Appliance layout
         app_xy = {
             # Front pannel
-            'FL':[-.5, 0.28],
-            'FR':[.4, 0.28],
+            'FL':[-.35, 0.28],
+            'FR':[.5, 0.28],
             # Left pannel
-            'LL':[-1., -1.0],
-            'LR':[-1., -.25],
+            'LL':[-0.85, -0.85],
+            'LR':[-0.75, -.15],
             # Right pannel
             'RL':[1., -.25],
             'RR':[1., -1.0],
@@ -463,11 +476,17 @@ class KitchenFrankaAugment(KitchenFrankaFixed):
 
         if reset_qpos is None:
             reset_qpos = self.init_qpos.copy()
+            reset_qpos[self.robot_dofs] = [0.101, -1.36, 0, -2.476  ,  0.3252,  0.8291,  1.6246,0.04  ,  0.04  ]
             reset_qpos[self.robot_dofs] += (
                 0.05
                 * (self.np_random.uniform(size=len(self.robot_dofs)) - 0.5)
                 * (self.robot_ranges[:, 1] - self.robot_ranges[:, 0])
             )
+            # reset_qpos[self.robot_dofs] = (
+            #      0.1
+            #     * (self.np_random.uniform(low=-0.5, high=0.5, size=len(self.robot_dofs)))
+            #     * (self.robot_ranges[:, 1] - self.robot_ranges[:, 0])
+            # )
         super().reset(reset_qpos=reset_qpos, reset_qvel=reset_qvel)
         # if 'layout' in self.augment_types:
         #     self.randomize_layout()

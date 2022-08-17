@@ -11,8 +11,8 @@ from gym.envs.registration import register
 # from mj_envs.envs.relay_kitchen.kitchen_multitask_v1 import KitchenTasksV0  #??? uses mjrl, remove dependency
 from mj_envs.envs.relay_kitchen.franka_kitchen_v1 import KitchenFrankaFixed, KitchenFrankaRandom, KitchenFrankaDemo
 
-print("RS:> Registering Kitchen Envs")
-print('Resigtering kitchen fron relay_kitchen')
+# print("RS:> Registering Kitchen Envs")
+# print('Resigtering kitchen fron relay_kitchen')
 
 CURR_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = CURR_DIR + "/assets/franka_kitchen.xml"

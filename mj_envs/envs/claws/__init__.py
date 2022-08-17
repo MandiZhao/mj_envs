@@ -9,7 +9,7 @@ from gym.envs.registration import register
 import os
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 
-print("RS:> Registering Claw Envs")
+# print("RS:> Registering Claw Envs")
 
 # FRANKA REACH =======================================================================
 from mj_envs.envs.claws.reorient_v0 import ReorientBaseV0

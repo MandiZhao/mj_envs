@@ -354,12 +354,14 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
         """
         num_success = 0
         num_paths = len(paths)
+        success_paths = []
 
         # Record success if solved for provided successful_steps
         for path in paths:
             if np.sum(path['env_infos']['solved'] * 1.0) > successful_steps:
                 # sum of truth values may not work correctly if dtype=object, need to * 1.0
                 num_success += 1
+                success_paths.append(path)
         success_percentage = num_success*100.0/num_paths
 
         # log stats
@@ -370,7 +372,7 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
             logger.log_kv('rwd_dense', rwd_dense)
             logger.log_kv('success_percentage', success_percentage)
 
-        return success_percentage
+        return success_percentage, success_paths
 
 
     def seed(self, seed=None):
@@ -536,7 +538,8 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
             frame_size=(640,480),
             output_dir='/tmp/',
             filename='newvid',
-            device_id:int=0
+            device_id:int=0,
+            verbose:bool=True,
             ):
         """
             Examine a policy for behaviors;
@@ -563,15 +566,19 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
             rewards=[]
             agent_infos = []
             env_infos = []
+            env_states = [] 
 
-            print("Episode %d" % ep, end=":> ")
+            if verbose:
+                print("Episode %d" % ep, end=":> ")
             o = self.reset()
+            env_state = self.get_env_state()
+            env_info = self.get_env_infos() 
             done = False
             t = 0
             ep_rwd = 0.0
             while t < horizon and done is False:
                 a = policy.get_action(o)[0] if mode == 'exploration' else policy.get_action(o)[1]['evaluation']
-                next_o, rwd, done, env_info = self.step(a)
+                next_o, rwd, done, next_env_info = self.step(a)
                 ep_rwd += rwd
                 # render offscreen visuals
                 if render =='offscreen':
@@ -583,22 +590,29 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
                         device_id=device_id
                     )
                     frames[t,:,:,:] = curr_frame[0]
-                    print(t, end=', ', flush=True)
+                    # print(t, end=', ', flush=True)
                 observations.append(o)
                 actions.append(a)
                 rewards.append(rwd)
                 # agent_infos.append(agent_info)
                 env_infos.append(env_info)
+                env_states.append(env_state)
+
                 o = next_o
+                env_info = next_env_info 
+                env_state = self.get_env_state()
                 t = t+1
 
-            print("Total reward = %3.3f, Total time = %2.3f" % (ep_rwd, ep_t0-timer.time()))
+            if verbose:
+                print("Total reward = %3.3f, Total time = %2.3f" % (ep_rwd, ep_t0-timer.time()))
+            # breakpoint()
             path = dict(
             observations=np.array(observations),
             actions=np.array(actions),
             rewards=np.array(rewards),
             # agent_infos=tensor_utils.stack_tensor_dict_list(agent_infos),
             env_infos=tensor_utils.stack_tensor_dict_list(env_infos),
+            env_states=tensor_utils.stack_tensor_dict_list(env_states),
             terminated=done
             )
             paths.append(path)
@@ -610,7 +624,8 @@ class MujocoEnv(gym.Env, gym.utils.EzPickle, ObsVecDict):
                 print("saved", file_name)
 
         self.mujoco_render_frames = False
-        print("Total time taken = %f"% (timer.time()-exp_t0))
+        if verbose:
+            print("Total time taken = %f"% (timer.time()-exp_t0))
         return paths
 
 

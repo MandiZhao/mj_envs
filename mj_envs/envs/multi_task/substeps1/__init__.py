@@ -11,7 +11,7 @@ from gym.envs.registration import register
 CURR_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Appliences ============================================================================
-print("RS:> Registering Appliances Envs")
+# print("RS:> Registering Appliances Envs")
 
 from mj_envs.envs.multi_task.common.franka_appliance_v1 import FrankaAppliance
 # MICROWAVE
@@ -110,8 +110,8 @@ register(
 # In this version of the environment, the observations consist of the
 # distance between end effector and all relevent objects in the scene
 
-print("RS:> Registering Kitchen Envs")
-print("Resgistering Kitchen from multi_task/substeps1")
+# print("RS:> Registering Kitchen Envs")
+# print("Resgistering Kitchen from multi_task/substeps1")
 from mj_envs.envs.multi_task.common.franka_kitchen_v1 import KitchenFrankaFixed, KitchenFrankaRandom, KitchenFrankaDemo
 
 MODEL_PATH = CURR_DIR + "/../common/kitchen/franka_kitchen.xml"
@@ -148,6 +148,47 @@ register(
             "leftdoorhinge": 0,
         },
         "obs_keys_wt": obs_keys_wt,
+    },
+)
+
+# Move Kettle
+register(
+    id="kitchen_kettle_back-v3",
+    entry_point=ENTRY_POINT,
+    max_episode_steps=50,
+    kwargs={
+        "model_path": MODEL_PATH,
+        "config_path": CONFIG_PATH,
+        "obj_init": {
+            "kettle0:Tx": -0.269,
+            "kettle0:Ty": 0.35,
+            },
+        "obj_goal": {
+            "kettle0:Tx": -0.269,
+            "kettle0:Ty": 0.8,
+        },
+        "obs_keys_wt": obs_keys_wt,
+        "interact_site": "kettle_site",
+    },
+)
+
+register(
+    id="kitchen_kettle_front-v3",
+    entry_point=ENTRY_POINT,
+    max_episode_steps=50,
+    kwargs={
+        "model_path": MODEL_PATH,
+        "config_path": CONFIG_PATH,
+        "obj_init": {
+            "kettle0:Tx": -0.269,
+            "kettle0:Ty": 0.35,
+            },
+        "obj_goal": {
+            "kettle0:Tx": 0.2,
+            "kettle0:Ty": 0.35,
+        },
+        "obs_keys_wt": obs_keys_wt,
+        "interact_site": "kettle_site",
     },
 )
 

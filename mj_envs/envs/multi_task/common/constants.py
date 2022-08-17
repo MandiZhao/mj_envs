@@ -174,14 +174,16 @@ TEXTURE_ID_TO_INFOS = {
 
 OBJ_JNT_RANGE = {
     'lightswitch_joint': (-0.6, 0), 
-    'rightdoorhinge': (0, 1), 
+    'rightdoorhinge': (0, 0.2), 
     'slidedoor_joint': (0, 0.3), 
-    'leftdoorhinge': (-1, 0), 
+    'leftdoorhinge': (-0.2, 0), 
     'micro0joint': (-1, 0), 
     'knob1_joint': (-1, 0), 
     'knob2_joint': (-1, 0),   
     'knob3_joint': (-1, 0), 
     'knob4_joint': (-1, 0), 
+    'kettle0:Tx': (-0.4, -0.1), #(-0.1, 0.1),
+    'kettle0:Ty': (0.1, 0.5), # (0.0, 0.2),
 }
 
 
